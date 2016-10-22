@@ -58,12 +58,30 @@ void draw(){
     p.x = x;
     p.y = y;
     points[i] = p;
-    min.x = min(min.x, x);
-    min.y = min(min.y, y);
-    max.x = max(max.x, x);
-    max.y = max(max.y, y);
+    min.x = min(min.x, x); min.y = min(min.y, y);
+    max.x = max(max.x, x); max.y = max(max.y, y);
+  }
+  int total = ceil((max.y - min.y + 1) * (max.x - min.x + 1));
+  color[] copy = new color[total];
+  loadPixels();
+  updatePixels();
+  int k = 0;
+  for(int i = (int) min.y; i <= (int) max.y; ++i){
+    for(int j = (int) min.x; j <= (int) max.x; ++j){
+      copy[k] = pixels[i*W + j];
+      k++;
+    }
   }
   noStroke();
   triangle(points[0].x, points[0].y, points[1].x, points[1].y, points[2].x, points[2].y);
   
+  loadPixels();
+  k = 0;
+  for(int i = (int) min.y; i <= (int) max.y; ++i){
+    for(int j = (int) min.x; j <= (int) max.x; ++j){
+      pixels[i*W + j] = copy[k];
+      k++;
+    }
+  }
+  updatePixels();
 }
