@@ -46,7 +46,7 @@ boolean inTriangle(PVector p, PVector t1, PVector t2, PVector t3){
 
 
 float rmse(PVector p, color c){
-  color o = pixels[floor(p.y) * W + floor(p.x)];
+  color o = base.pixels[floor(p.y) * W + floor(p.x)];
   return sqrt(sq(hue(o) - hue(c)) + sq(saturation(o) - saturation(c)) + sq(brightness(o) - brightness(c)));
 }
 
@@ -89,13 +89,19 @@ void draw(){
     }
   }
   noStroke();
-  boolean erase = false;
+  float temperature = 0.1;
   color fill = color(random(255), random(255),random(255),random(255));
   fill(fill);
   triangle(points[0].x, points[0].y, points[1].x, points[1].y, points[2].x, points[2].y);
+  loadPixels();
+  for(int i = (int) min.y; i <= (int) max.y; ++i){
+    for(int j = (int) min.x; j <= (int) max.x; ++j){
+      if(!inTriangle(new PVector(j, i), points[0], points[1], points[2])) continue;
+      rmseNew += rmse(new PVector(j, i),pixels[i*W + j]);
+    }
+  }
   
-  if(erase){
-    loadPixels();
+  if(rmseNew > rmseOriginal || random(1) < temperature){
     k = 0;
     for(int i = (int) min.y; i <= (int) max.y; ++i){
       for(int j = (int) min.x; j <= (int) max.x; ++j){
