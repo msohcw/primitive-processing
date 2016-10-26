@@ -1,57 +1,29 @@
-PGraphics pg;
-
-int W, H;
 PImage base;
+color[] copy;
 
-void setup() {
-  size(800, 530);
-  W = 800;
-  H = 530;
-  background(0);
-  base = loadImage("lake.png");
-  base.loadPixels();
-  loadPixels();
+int W = 200; 
+int H = 133;
+float expansion = 0.1;
+float density = -30;
+float global = -35000;
 
-//  int[] h = new int[256];
-//  int[] s = new int[256]; 
-//  int[] b = new int[256];
-//  for(int i = 0; i < 256; ++i) h[i] = s[i] = b[i] = 0;
-  
-  float h, s, b;
-  h = s = b = 0;
-  for(int i = 0; i < W*H; ++i){
-    color pix = base.pixels[i];
-    //h[round(hue(pix))]++; s[round(saturation(pix))]++; b[round(brightness(pix))]++;
-    h += hue(pix); s += saturation(pix); b += brightness(pix);
-  }
-  
-  //int H, S, B;
-  //int bestH, bestS, bestB;
-  //bestH = bestS = bestB = 0;
-  //H = S = B = 0;
-  
-  //for(int i = 0; i < 256; ++i){
-  //  if(h[i] > bestH){
-  //    bestH = h[i];
-  //    H = i;  
-  //  }
-  //  if(s[i] > bestS){
-  //    bestS = s[i];
-  //    S = i;
-  //  }
-  //  if(b[i] > bestB){
-  //    bestB = b[i];
-  //    B = i;
-  //  }
-  //}
-  h/= W*H; s/= W*H; b/= W*H;
-  colorMode(HSB);
-  background(color(round(h),round(s),round(b)));
+int left, right, up, down;
+float rmseTotal = 0;
+int pix = 0;
+int triangles = 0;
+
+PVector[] pts = new PVector[3];
+PVector boundMax = new PVector(0, 0);
+PVector boundMin = new PVector(W, H);
+
+float rmse(PVector p, color c){
+  color o = base.pixels[floor(p.y) * W + floor(p.x)];
+  return sqrt(sq(red(o) - red(c))*h_bias + sq(green(o) - green(c))* s_bias + sq(blue(o) - blue(c))* b_bias);
 }
 
-int epochs = 100000;
-int currentEpoch = 0;
-float temperature = 0.1;
+float area(PVector t1, PVector t2, PVector t3){
+  return 0.5 * abs((t1.x * t2.y) + (t2.x * t3.y) + (t3.x * t1.y) - (t2.x * t1.y) - (t3.x * t2.y) - (t1.x * t3.y));
+}
 
 boolean inTriangle(PVector p, PVector t1, PVector t2, PVector t3){
   // uses conversion to barycentric coordinates
@@ -63,113 +35,168 @@ boolean inTriangle(PVector p, PVector t1, PVector t2, PVector t3){
   return (s >= 0) && (s <= 1) && (t >= 0) && (t <= 1) && (s+t <= 1);
 }
 
+void setup() {
+  size(200, 133);
+  copy = new color[W * H];
+  base = loadImage("lake_xs.png");
+  
+  base.loadPixels();
+  loadPixels();
 
-float rmse(PVector p, color c){
-  float h_bias = 1.3;
-  float s_bias = 0.9;
-  float b_bias = 0.8;
-  color o = base.pixels[floor(p.y) * W + floor(p.x)];
-  return sqrt(sq(hue(o) - hue(c))*h_bias + sq(saturation(o) - saturation(c))* s_bias + sq(brightness(o) - brightness(c))* b_bias);
+  left = round(0 - W * expansion);
+  right = round(W * (1 + expansion));
+  up = round(0 - H*expansion);
+  down = round(H * (1 + expansion));
+  
+  float h, s, b;
+  h = s = b = 0;
+  
+  for(int i = 0; i < W*H; ++i){
+    color pix = base.pixels[i];
+    h += red(pix); s += saturation(pix); b += brightness(pix);
+  }
+  
+  h/= W*H; s/= W*H; b/= W*H;
+  colorMode(HSB);
+  background(color(round(h),round(s),round(b)));
+  
+  for(int i = 0; i < W*H; ++i) rmseTotal += rmse(new PVector(i%W, floor(i/W)), color(#ffffff));
 }
 
-int triangles = 0;
-
-float area(PVector t1, PVector t2, PVector t3){
-  return 0.5 * abs((t1.x * t2.y) + (t2.x * t3.y) + (t3.x * t1.y) - (t2.x * t1.y) - (t3.x * t2.y) - (t1.x * t3.y));
+void updateBounds(int i){
+  if(pts[i].x < boundMin.x) boundMin.x = pts[i].x;
+  if(pts[i].x > boundMax.x) boundMax.x = pts[i].x;
+  if(pts[i].y < boundMin.y) boundMin.y = pts[i].y;
+  if(pts[i].y > boundMax.y) boundMax.y = pts[i].y;
 }
+
+void clipBounds(){
+  boundMax.x = min(W-1, boundMax.x);
+  boundMin.x = max(0, boundMin.x);
+  boundMax.y = min(H-1, boundMax.y);
+  boundMin.y = max(0, boundMin.y);
+}
+
+void shrink(){
+  PVector average = new PVector(0,0);
+  float av_dist = 0;
+  for(int i = 0; i < 3; ++i){
+    average.x += pts[i].x;
+    average.y += pts[i].y;
+    av_dist += dist(pts[i].x, pts[i].y, average.x, average.y);
+  }
+  average.x/=3;
+  average.y/=3;
+  for(int i = 0; i < 3; ++i){
+    float factor = 0.995;
+    pts[i].x = factor * pts[i].x + (1-factor) * average.x;
+    pts[i].y = factor * pts[i].y + (1-factor) * average.y;
+  }
+}
+
+int tries = 0;
+Boolean repeat = false;
+PVector transform = new PVector(0,0,0);
+PVector[] oldPts = new PVector[3];
 
 void draw(){
-  if(currentEpoch > epochs) return;
-  currentEpoch++;
-  temperature -= 0.1 * 1/epochs;
-  if(currentEpoch % 100 == 0) println(currentEpoch + " epochs , " + triangles + " triangles");
-  for(int T = 0; T < 10; ++T){
-    PVector[] points = new PVector[3];
-    PVector min = new PVector(W, H);
-    PVector max = new PVector(0, 0);
-    
-    for(int i = 0; i < 3; ++i){
-      int x, y;
-      float expansion = 0.5;
-      x = floor(random(W*(1+expansion)) - 0.5*expansion*W);
-      y = floor(random(H*(1+expansion)) - 0.5*expansion*H);
-      PVector p = new PVector();
-      p.x = x;
-      p.y = y;
-      points[i] = p;
-      min.x = min(min.x, x); min.y = min(min.y, y);
-      max.x = max(max.x, x); max.y = max(max.y, y);
-    }
-    
-    max.x = min(W-1, max.x); max.y = min(H-1, max.y);
-    min.y = max(0, min.y); min.x = max(0, min.x);
-    
-    int total = ceil((max.y - min.y + 1) * (max.x - min.x + 1));
-    color[] copy = new color[total];
+  for(int k = 0; k < 100; ++k){
     loadPixels();
     updatePixels();
-    int k = 0;
-    float rmseOriginal, rmseNew;
-    int[] h = new int[256];
-    int[] s = new int[256]; 
-    int[] b = new int[256];
-    for(int i = 0; i < 256; ++i) h[i] = s[i] = b[i] = 0;
     
-    rmseOriginal = rmseNew = 0;
-    for(int i = (int) min.y; i <= (int) max.y; ++i){
-      for(int j = (int) min.x; j <= (int) max.x; ++j){
-        copy[k] = pixels[i*W + j];
-        if(inTriangle(new PVector(j, i), points[0], points[1], points[2])){
-          color test = base.pixels[i*W +j];
-          h[floor(hue(test))]++;
-          s[floor(saturation(test))]++;
-          b[floor(brightness(test))]++;
-          rmseOriginal += rmse(new PVector(j, i),copy[k]);
+    if(pts[0] == null){
+      tries = 0;
+      boundMax = new PVector(0, 0);
+      boundMin = new PVector(W, H);
+      pts[0] = new PVector(random(left, right), random(up, down));
+      pts[1] = new PVector(random(left, right), random(up, down));
+      pts[2] = new PVector(random(left, right), random(up, down));
+      for(int i = 0; i < 3; ++i) updateBounds(i);
+      arrayCopy(pts, oldPts);
+      arrayCopy(pixels, copy);
+    }else{
+     tries++;
+     // erase
+     arrayCopy(copy, pixels);
+     updatePixels();
+     // check if too many tries or triangle too small
+     if(tries > 10000 || area(pts[0], pts[1], pts[2]) < 0.01 * W * H){
+        tries = 0;
+        pts = new PVector[3];
+        return;
+     }
+     // mutate
+     arrayCopy(pts, oldPts);
+     if(repeat){
+       // reapply positive mutation
+       repeat = false;
+       pts[(int) transform.z].x += transform.x;
+       pts[(int) transform.z].y += transform.y;
+     }else{
+       // try new mutation
+       int mutated = floor(random(3));
+       transform.z = mutated;
+       transform.x = round(random(-5,5));
+       transform.y = round(random(-5,5));
+       pts[mutated].x += transform.x;
+       pts[mutated].y += transform.y;
+       pts[mutated].x = min(right, max(left, pts[mutated].x));
+       pts[mutated].y = min(down, max(up, pts[mutated].y));
+       updateBounds(mutated);
+     }
+    }
+    shrink();
+    clipBounds();
+    
+    float r, g, b;
+    r = g = b = 0
+    float rmseChange = 0;
+    int A = 0;
+    // sum current RMSE
+    for(int i = (int) boundMin.y; i <= (int) boundMax.y; ++i){
+      for(int j = (int) boundMin.x; j <= (int) boundMax.x; ++j){
+        if(inTriangle(new PVector(j, i), pts[0], pts[1], pts[2])){
+          color tgt = base.pixels[i*W +j];
+          // color curr = pixels[i*W +j];
+          r += red(tgt);
+          g += green(tgt);
+          b += blue(tgt);
+          rmseChange -= rmse(new PVector(j, i) , curr);
+          A++;
         }
-        k++;
       }
-    }
-    int H, S, B;
-    int bestH, bestS, bestB;
-    bestH = bestS = bestB = 0;
-    H = S = B = 0;
-    for(int i = 0; i < 256; ++i){
-      if(h[i] > bestH){
-        bestH = h[i]; H = i;  
-      }
-      if(s[i] > bestS){
-        bestS = s[i]; S = i; 
-      }
-      if(b[i] > bestB){
-        bestB = b[i]; B = i;
-      }
-    }
+    } 
     
+    r /= A; g /= A; b /= A;
     noStroke();
-    colorMode(HSB);
-    color fill = color(H, S, B, random(128));
-    fill(fill);
-    triangle(points[0].x, points[0].y, points[1].x, points[1].y, points[2].x, points[2].y);
+    colorMode(RGB);
+    fill(r,g,b,128);
+    triangle(pts[0].x, pts[0].y, pts[1].x, pts[1].y, pts[2].x, pts[2].y);
+    
     loadPixels();
-    for(int i = (int) min.y; i <= (int) max.y; ++i){
-      for(int j = (int) min.x; j <= (int) max.x; ++j){
-        if(!inTriangle(new PVector(j, i), points[0], points[1], points[2])) continue;
-        rmseNew += rmse(new PVector(j, i),pixels[i*W + j]);
+    updatePixels();
+    
+    // add new RMSE
+    for(int i = (int) boundMin.y; i <= (int) boundMax.y; ++i){
+      for(int j = (int) boundMin.x; j <= (int) boundMax.x; ++j){
+        if(inTriangle(new PVector(j, i), pts[0], pts[1], pts[2])){
+          color curr = pixels[i*W +j];
+          rmseChange += rmse(new PVector(j, i) , curr);
+        }
       }
     }
     
-    triangles++;
-    
-    if(rmseNew/rmseOriginal > (1 - temperature*0.1) || random(1) < temperature){
-      triangles--;
-      k = 0;
-      for(int i = (int) min.y; i <= (int) max.y; ++i){
-        for(int j = (int) min.x; j <= (int) max.x; ++j){
-          pixels[i*W + j] = copy[k];
-          k++;
-        }
-      }
-      updatePixels();
+    // if positive change in terms of RMSE density or global RMSE, apply
+    if(rmseChange/A < density || rmseChange < global){
+      pts = new PVector[3];
+      rmseTotal += rmseChange;
+      triangles++;
+      println("triangles: " + triangles);
+    }else if(rmseChange/A < density/2){
+      repeat = true;
+    }else if(rmseChange > 0){
+      // undo mutation
+      arrayCopy(oldPts, pts);
     }
   }
 }
